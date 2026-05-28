@@ -1,0 +1,6 @@
+name = "telegram-personal-assistant"
+main = "src/index.ts"
+compatibility_date = "2026-05-28"
+
+[triggers]
+crons = ["0 6,7 * * *"]

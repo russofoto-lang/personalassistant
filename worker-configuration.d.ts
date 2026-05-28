@@ -1,0 +1,15 @@
+interface Env {
+  TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_SECRET_TOKEN: string;
+  TELEGRAM_CHAT_ID: string;
+  SUPABASE_URL: string;
+  SUPABASE_SERVICE_ROLE_KEY: string;
+  GEMINI_API_KEY: string;
+  GOOGLE_CALENDAR_CLIENT_ID: string;
+  GOOGLE_CALENDAR_CLIENT_SECRET: string;
+  GOOGLE_CALENDAR_REFRESH_TOKEN: string;
+  WEATHER_API_KEY: string;
+  NEWS_API_KEY: string;
+  TIMEZONE: string;
+  DEFAULT_CITY: string;
+}
