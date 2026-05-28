@@ -1,5 +1,3 @@
-create extension if not exists vector;
-
 create table if not exists public.telegram_users (
   id uuid primary key default gen_random_uuid(),
   telegram_user_id bigint not null,
@@ -21,8 +19,7 @@ create table if not exists public.personal_memory (
   people text[] not null default '{}',
   places text[] not null default '{}',
   event_date date,
-  created_at timestamptz not null default now(),
-  embedding vector(768) not null
+  created_at timestamptz not null default now()
 );
 
 create table if not exists public.personal_tasks (
@@ -35,8 +32,7 @@ create table if not exists public.personal_tasks (
   tags text[] not null default '{}',
   category text not null default 'generale',
   created_at timestamptz not null default now(),
-  completed_at timestamptz,
-  embedding vector(768) not null
+  completed_at timestamptz
 );
 
 create table if not exists public.daily_briefings_log (
@@ -67,87 +63,3 @@ create index if not exists personal_tasks_due_status_idx
 
 create index if not exists personal_tasks_tags_idx
   on public.personal_tasks using gin (tags);
-
-create index if not exists personal_memory_embedding_idx
-  on public.personal_memory using ivfflat (embedding vector_cosine_ops)
-  with (lists = 100);
-
-create index if not exists personal_tasks_embedding_idx
-  on public.personal_tasks using ivfflat (embedding vector_cosine_ops)
-  with (lists = 100);
-
-create or replace function public.match_personal_memory(
-  query_embedding vector(768),
-  match_chat_id text,
-  match_count int default 8,
-  similarity_threshold float default 0.55
-)
-returns table (
-  id uuid,
-  original_text text,
-  summary text,
-  tags text[],
-  category text,
-  people text[],
-  places text[],
-  event_date date,
-  created_at timestamptz,
-  similarity float
-)
-language sql
-stable
-as $$
-  select
-    pm.id,
-    pm.original_text,
-    pm.summary,
-    pm.tags,
-    pm.category,
-    pm.people,
-    pm.places,
-    pm.event_date,
-    pm.created_at,
-    1 - (pm.embedding <=> query_embedding) as similarity
-  from public.personal_memory pm
-  where pm.telegram_chat_id = match_chat_id
-    and 1 - (pm.embedding <=> query_embedding) >= similarity_threshold
-  order by pm.embedding <=> query_embedding
-  limit match_count;
-$$;
-
-create or replace function public.match_personal_tasks(
-  query_embedding vector(768),
-  match_chat_id text,
-  match_count int default 8,
-  similarity_threshold float default 0.55
-)
-returns table (
-  id uuid,
-  original_text text,
-  summary text,
-  due_date date,
-  status text,
-  tags text[],
-  category text,
-  created_at timestamptz,
-  similarity float
-)
-language sql
-stable
-as $$
-  select
-    pt.id,
-    pt.original_text,
-    pt.summary,
-    pt.due_date,
-    pt.status,
-    pt.tags,
-    pt.category,
-    pt.created_at,
-    1 - (pt.embedding <=> query_embedding) as similarity
-  from public.personal_tasks pt
-  where pt.telegram_chat_id = match_chat_id
-    and 1 - (pt.embedding <=> query_embedding) >= similarity_threshold
-  order by pt.embedding <=> query_embedding
-  limit match_count;
-$$;

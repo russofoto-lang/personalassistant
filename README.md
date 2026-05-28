@@ -4,7 +4,7 @@ Assistente personale Telegram economico nei token, basato su:
 
 - Cloudflare Worker in TypeScript
 - Telegram Bot via webhook
-- Supabase Postgres con pgvector
+- Supabase Postgres
 - Google Calendar API
 - Gemini Flash
 - Cron Cloudflare ogni giorno alle 08:00 Europe/Rome
@@ -14,10 +14,10 @@ La V1 non ha dashboard o frontend. Tutto passa da Telegram.
 ## Funzioni
 
 - `/start` attiva e mostra i comandi.
-- `/nota testo` salva una nota libera con sintesi, tag, categoria, persone, luoghi, eventuale data ed embedding.
-- `/task testo` salva un promemoria con eventuale data, stato `open`, tag, categoria ed embedding.
+- `/nota testo` salva una nota libera con sintesi, tag, categoria, persone, luoghi ed eventuale data.
+- `/task testo` salva un promemoria con eventuale data, stato `open`, tag e categoria.
 - `/oggi` mostra eventi Google Calendar di oggi, task di oggi e note collegate alla data.
-- `/cerca testo` cerca nella memoria con keyword + pgvector, deduplica e manda a Gemini solo i 10 risultati migliori.
+- `/cerca testo` cerca nella memoria con keyword Supabase, deduplica e manda a Gemini solo i 10 risultati migliori.
 - Briefing automatico alle 08:00 Europe/Rome con meteo Foggia, notizie locali, notizie italiane, calendario, task e “Un anno fa oggi”.
 
 ## Struttura
@@ -72,8 +72,6 @@ npm run dev
 1. Crea un progetto Supabase.
 2. Apri SQL Editor.
 3. Esegui `supabase/migrations/001_initial_schema.sql`.
-4. Verifica che l'estensione `vector` sia attiva.
-
 La migration crea:
 
 - `telegram_users`
@@ -81,8 +79,6 @@ La migration crea:
 - `personal_tasks`
 - `daily_briefings_log`
 - indici keyword/date/tag
-- indici vector cosine
-- funzioni `match_personal_memory` e `match_personal_tasks`
 
 Il Worker usa la service role key perché gira server-side su Cloudflare. Non esporla mai lato client.
 
@@ -115,10 +111,9 @@ Serve una API key Google AI Studio.
 
 La V1 usa:
 
-- `gemini-2.0-flash` per estrazione/sintesi.
-- `text-embedding-004` per embedding a 768 dimensioni.
+- `gemini-2.0-flash` per estrazione, sintesi briefing e risposta finale di `/cerca`.
 
-Gli embedding sono salvati in Supabase come `vector(768)`.
+Non genera vettori semantici con Google.
 
 ## Google Calendar
 
@@ -201,12 +196,11 @@ La memoria completa non viene mai inviata a Gemini.
 
 Flusso di `/cerca`:
 
-1. crea embedding della query;
-2. cerca keyword in `original_text`, `summary`, `tags`;
-3. cerca con pgvector;
-4. unisce e deduplica;
-5. prende massimo 10 risultati;
-6. manda solo quei risultati a Gemini.
+1. cerca keyword in `original_text`, `summary`, `tags`;
+2. unisce e deduplica;
+3. prende massimo 10 risultati;
+4. manda solo quei risultati a Gemini;
+5. Gemini collega informazioni simili semanticamente e produce una risposta breve.
 
 Per `/nota` e `/task`, il Worker prova prima a estrarre date, tag e categoria con codice locale. Gemini viene usato solo se il testo è più ambiguo o contiene segnali di persone/luoghi/date non banali.
 

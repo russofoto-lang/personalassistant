@@ -32,8 +32,6 @@ type SearchItem = {
 };
 
 const GEMINI_FLASH_MODEL = "gemini-2.0-flash";
-const GEMINI_EMBEDDING_MODEL = "text-embedding-004";
-const EMBEDDING_DIMENSIONS = 768;
 const MAX_TELEGRAM_LENGTH = 3900;
 
 export default {
@@ -111,7 +109,6 @@ async function handleNote(env: Env, chatId: string, text: string): Promise<void>
   const today = todayInTimezone(env);
   const parsedDate = parseItalianDate(text, today);
   const info = await extractInfo(env, "note", text, parsedDate);
-  const embedding = await createEmbedding(env, compactEmbeddingText(text, info));
 
   await supabaseInsert(env, "personal_memory", {
     telegram_chat_id: chatId,
@@ -122,7 +119,6 @@ async function handleNote(env: Env, chatId: string, text: string): Promise<void>
     people: info.people,
     places: info.places,
     event_date: info.event_date,
-    embedding,
   });
 
   await sendTelegramMessage(env, chatId, `Nota salvata.\n${formatSummaryLine(info)}`);
@@ -137,7 +133,6 @@ async function handleTask(env: Env, chatId: string, text: string): Promise<void>
   const today = todayInTimezone(env);
   const parsedDate = parseItalianDate(text, today);
   const info = await extractInfo(env, "task", text, parsedDate);
-  const embedding = await createEmbedding(env, compactEmbeddingText(text, info));
 
   await supabaseInsert(env, "personal_tasks", {
     telegram_chat_id: chatId,
@@ -147,7 +142,6 @@ async function handleTask(env: Env, chatId: string, text: string): Promise<void>
     status: "open",
     tags: info.tags,
     category: info.category,
-    embedding,
   });
 
   const due = info.due_date ? `\nScadenza: ${formatDateIt(info.due_date)}` : "";
@@ -171,12 +165,7 @@ async function handleSearch(env: Env, chatId: string, query: string): Promise<vo
     return;
   }
 
-  const embedding = await createEmbedding(env, query);
-  const [keyword, vector] = await Promise.all([
-    searchKeyword(env, chatId, query),
-    searchVector(env, chatId, embedding),
-  ]);
-  const candidates = mergeSearchResults([...keyword, ...vector]).slice(0, 10);
+  const candidates = mergeSearchResults(await searchKeyword(env, chatId, query)).slice(0, 10);
 
   if (candidates.length === 0) {
     await sendTelegramMessage(env, chatId, "Non ho trovato nulla di rilevante nella memoria.");
@@ -313,23 +302,6 @@ function parseItalianDate(text: string, today: string): string | null {
   }
 
   return null;
-}
-
-async function createEmbedding(env: Env, text: string): Promise<number[]> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_EMBEDDING_MODEL}:embedContent?key=${env.GEMINI_API_KEY}`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: `models/${GEMINI_EMBEDDING_MODEL}`,
-      content: { parts: [{ text: text.slice(0, 3000) }] },
-      outputDimensionality: EMBEDDING_DIMENSIONS,
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Gemini embedding failed: ${response.status}`);
-  const data = (await response.json()) as { embedding?: { values?: number[] } };
-  return data.embedding?.values ?? [];
 }
 
 async function generateGemini(env: Env, prompt: string, temperature = 0.2, maxOutputTokens = 1200): Promise<string> {
@@ -560,28 +532,6 @@ async function searchKeyword(env: Env, chatId: string, query: string): Promise<S
   ];
 }
 
-async function searchVector(env: Env, chatId: string, embedding: number[]): Promise<SearchItem[]> {
-  const [notes, tasks] = await Promise.all([
-    supabaseRpc(env, "match_personal_memory", {
-      query_embedding: embedding,
-      match_chat_id: chatId,
-      match_count: 8,
-      similarity_threshold: 0.55,
-    }),
-    supabaseRpc(env, "match_personal_tasks", {
-      query_embedding: embedding,
-      match_chat_id: chatId,
-      match_count: 8,
-      similarity_threshold: 0.55,
-    }),
-  ]);
-
-  return [
-    ...notes.map((n) => rowToSearchItem("note", n, n.event_date, n.similarity ?? 0)),
-    ...tasks.map((t) => rowToSearchItem("task", t, t.due_date, t.similarity ?? 0)),
-  ];
-}
-
 async function upsertTelegramUser(env: Env, message: NonNullable<TelegramUpdate["message"]>): Promise<void> {
   const from = message.from;
   await supabaseUpsert(env, "telegram_users", {
@@ -624,16 +574,6 @@ async function supabaseSelect(
   }
   const response = await fetch(url, { headers: supabaseHeaders(env) });
   if (!response.ok) throw new Error(`Supabase select ${table} failed: ${response.status} ${await response.text()}`);
-  return response.json();
-}
-
-async function supabaseRpc(env: Env, fn: string, payload: Record<string, unknown>): Promise<any[]> {
-  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-    method: "POST",
-    headers: supabaseHeaders(env),
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error(`Supabase rpc ${fn} failed: ${response.status} ${await response.text()}`);
   return response.json();
 }
 
@@ -721,10 +661,6 @@ function rowToSearchItem(kind: MemoryKind, row: any, date: string | null, score:
     date,
     score,
   };
-}
-
-function compactEmbeddingText(text: string, info: ExtractedInfo): string {
-  return [text, info.summary, info.category, info.tags.join(" ")].filter(Boolean).join("\n").slice(0, 3000);
 }
 
 function hasEntitySignals(text: string): boolean {
